@@ -144,8 +144,13 @@ async function handleRequest(req: Request, server: Bun.Server, url: URL): Promis
             // the logger worker, which owns the telemetry DB work; payload is pre-gzipped)
             if (url.pathname === '/playertraces' || url.pathname === '/playertraces/') {
                 try {
+                    // a cold build can outlast Bun's 10s idle timeout, which drops the
+                    // connection and surfaces as a bare 502 from the fly proxy
+                    server.timeout(req, 60);
                     const hours = url.searchParams.get('hours') ?? '24';
-                    const upstream = await fetch(`http://${Environment.logger.host}:${Environment.logger.port + 1}/traces?hours=${encodeURIComponent(hours)}`);
+                    const upstream = await fetch(`http://${Environment.logger.host}:${Environment.logger.port + 1}/traces?hours=${encodeURIComponent(hours)}`, {
+                        signal: AbortSignal.timeout(55_000)
+                    });
                     if (!upstream.ok) {
                         throw new Error(`traces upstream ${upstream.status}`);
                     }

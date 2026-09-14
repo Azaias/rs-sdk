@@ -134,18 +134,24 @@ async function compactTelemetry() {
 // decoding thousands of segments never stalls the game tick; the engine web server
 // proxies /playertraces to this port. Lines are flat [x1,z1,x2,z2,...] with no identity.
 const TRACES_HTTP_PORT = Environment.logger.port + 1;
-const TRACES_MAX_HOURS = 168;
+// requested windows snap up to one of these so the cache (and concurrent builds) stay
+// bounded no matter what ?hours= values get thrown at the endpoint
+const TRACES_HOUR_BUCKETS = [1, 6, 24, 72, 168];
 const TRACES_MAX_POINTS = 2_000_000;
 // hard ceilings on what a single build may hold in memory - a request for a busy
-// window must degrade (truncate) rather than OOM the whole server
+// window must degrade (truncate) rather than OOM the whole server. This runs inside the
+// engine process, which has little headroom at swarm scale
 const TRACES_MAX_INPUT_POINTS = TRACES_MAX_POINTS * 4;
 const TRACES_MAX_RAW_ROWS = 500_000;
-// a week-wide window at swarm scale can hold 300k+ segment blobs; cap how many we
-// materialize at once (most recent first) so the build can't blow memory
-const TRACES_MAX_SEGMENTS = 250_000;
+// a week at swarm scale holds 2M+ segment blobs (~68 samples each); past this cap the
+// segments are stride-sampled evenly across the window instead of materializing them all
+const TRACES_MAX_SEGMENTS = 100_000;
+// compaction buckets segments per clock hour, so a segment never spans more than this
+const TRACES_SEGMENT_MAX_SPAN_MS = 3600_000;
 const TRACES_CACHE_MS = 5 * 60 * 1000;
 
 const tracesCache = new Map<number, { at: number; buf: Buffer }>();
+const tracesBuilds = new Map<number, Promise<Buffer>>();
 
 // only connect consecutive samples close in time AND plausibly-walkable in space -
 // anything else (coarse-cadence data, teleports, login gaps) must not draw a line the
@@ -249,15 +255,28 @@ function simplifyLine(line: number[], tol: number): number[] {
 }
 
 async function buildTraces(hours: number): Promise<Buffer> {
-    const since = toDbDate(Date.now() - hours * 3600_000);
+    const sinceMs = Date.now() - hours * 3600_000;
+    const since = toDbDate(sinceMs);
+    // there is no end_time index; bound start_time so the query stays on the start_time
+    // index instead of scanning (and sorting) every segment ever written
+    const startBound = toDbDate(sinceMs - TRACES_SEGMENT_MAX_SPAN_MS);
     const lines: number[][] = [];
     let points = 0;
+
+    const { count } = await db
+        .selectFrom('player_telemetry_segment')
+        .select(eb => eb.fn.countAll<number>().as('count'))
+        .where('start_time', '>=', startBound)
+        .executeTakeFirstOrThrow();
+    const stride = Math.max(1, Math.ceil(Number(count) / TRACES_MAX_SEGMENTS));
 
     const segments = await db
         .selectFrom('player_telemetry_segment')
         .select(['data'])
+        .where('start_time', '>=', startBound)
         .where('end_time', '>=', since)
-        .orderBy('end_time', 'desc')
+        .$if(stride > 1, qb => qb.where(sql<boolean>`(id % ${stride}) = 0`))
+        .orderBy('start_time', 'desc')
         .limit(TRACES_MAX_SEGMENTS)
         .execute();
 
@@ -274,8 +293,10 @@ async function buildTraces(hours: number): Promise<Buffer> {
         }
     }
 
-    // recent rows not compacted yet - group per session so lines never span players
-    const raw = await db
+    // recent rows not compacted yet - group per session so lines never span players.
+    // Skipped when segments were sampled: raw rows are only the last ~hour, and drawing
+    // them at full density next to sampled segments would just over-weight that hour
+    const raw = stride > 1 ? [] : await db
         .selectFrom('player_telemetry')
         .select(['username', 'session_uuid', 'timestamp', 'x', 'z'])
         .where('timestamp', '>=', since)
@@ -334,6 +355,32 @@ async function buildTraces(hours: number): Promise<Buffer> {
     return gzipSync(JSON.stringify({ hours, lines }));
 }
 
+// one build per window at a time; while a stale entry is being rebuilt, keep serving it
+// so callers never sit behind a build they didn't need
+function getTraces(hours: number): Promise<Buffer> {
+    const cached = tracesCache.get(hours);
+    if (cached && Date.now() - cached.at <= TRACES_CACHE_MS) {
+        return Promise.resolve(cached.buf);
+    }
+
+    let build = tracesBuilds.get(hours);
+    if (!build) {
+        const started = Date.now();
+        build = buildTraces(hours)
+            .then(buf => {
+                tracesCache.set(hours, { at: Date.now(), buf });
+                printInfo(`Traces build for ${hours}h took ${Date.now() - started}ms (${buf.length} bytes)`);
+                return buf;
+            })
+            .finally(() => tracesBuilds.delete(hours));
+        tracesBuilds.set(hours, build);
+        // stale-served builds have no awaiting request to surface a failure
+        build.catch(err => console.error('Traces build failed', err));
+    }
+
+    return cached ? Promise.resolve(cached.buf) : build;
+}
+
 function startTracesHttp() {
     const server = http.createServer(async (req, res) => {
         try {
@@ -344,18 +391,15 @@ function startTracesHttp() {
                 return;
             }
 
-            const hours = Math.max(1, Math.min(TRACES_MAX_HOURS, Number(url.searchParams.get('hours')) || 24));
+            const requested = Number(url.searchParams.get('hours')) || 24;
+            const hours = TRACES_HOUR_BUCKETS.find(b => b >= requested) ?? TRACES_HOUR_BUCKETS[TRACES_HOUR_BUCKETS.length - 1];
 
-            let cached = tracesCache.get(hours);
-            if (!cached || Date.now() - cached.at > TRACES_CACHE_MS) {
-                cached = { at: Date.now(), buf: await buildTraces(hours) };
-                tracesCache.set(hours, cached);
-            }
+            const buf = await getTraces(hours);
 
             // served as opaque bytes so the engine's proxy fetch doesn't transparently
             // decompress; the proxy re-labels it as gzipped json for the browser
             res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
-            res.end(cached.buf);
+            res.end(buf);
         } catch (err) {
             console.error('Traces request failed', err);
             res.writeHead(500);
