@@ -892,10 +892,11 @@
                             <div class="tabs" id="sort-tabs" role="group" aria-label="Market views">
                                 <button data-sort="recent" class="active" aria-pressed="true">Recent trades</button>
                                 <button data-sort="buyValue" aria-pressed="false">Buy orders</button>
+                                <button data-sort="sellRecent" aria-pressed="false">Sell orders</button>
                                 <button data-sort="value" class="metric-tab" aria-pressed="false">
                                     <img src="/sprite/item/995-10000.png" alt="" />
                                     <span
-                                        ><span class="tab-label">Trade value · <span class="window-label">24h</span></span
+                                        ><span class="tab-label">Trade value · <span class="window-label">7d</span></span
                                         ><strong id="total-gold">—</strong> <span class="tab-unit">gp</span></span
                                     >
                                 </button>
@@ -903,14 +904,14 @@
                                 <button data-sort="volume" class="metric-tab" aria-pressed="false">
                                     <img src="/sprite/item/1511.png" alt="" />
                                     <span
-                                        ><span class="tab-label">Most traded · <span class="window-label">24h</span></span
+                                        ><span class="tab-label">Most traded · <span class="window-label">7d</span></span
                                         ><strong id="total-volume">—</strong></span
                                     >
                                 </button>
                             </div>
                             <div class="filters">
                                 <div class="periods" id="list-periods" role="group" aria-label="Market time period">
-                                    <button data-days="1" class="active" aria-pressed="true">24H</button><button data-days="7" aria-pressed="false">7D</button><button data-days="30" aria-pressed="false">30D</button
+                                    <button data-days="1" aria-pressed="false">24H</button><button data-days="7" class="active" aria-pressed="true">7D</button><button data-days="30" aria-pressed="false">30D</button
                                     ><button data-days="90" aria-pressed="false">90D</button>
                                 </div>
                             </div>
@@ -922,7 +923,7 @@
                                             <th scope="col" id="price-column">Price · gp</th>
                                             <th scope="col" id="change-column">Change</th>
                                             <th scope="col" id="metric-column">Volume</th>
-                                            <th scope="col">Last traded</th>
+                                            <th scope="col" id="time-column">Last traded</th>
                                         </tr>
                                     </thead>
                                     <tbody id="items">
@@ -1033,6 +1034,7 @@
             const titles = {
                 recent: 'Recent trades',
                 buyValue: 'Buy orders',
+                sellRecent: 'Sell orders',
                 value: 'Trade value',
                 price: 'Biggest items',
                 volume: 'Most traded',
@@ -1041,7 +1043,7 @@
             let offset = 0,
                 total = 0,
                 sort = 'recent',
-                days = 1,
+                days = 7,
                 detailDays = 30,
                 selected = null,
                 listSequence = 0,
@@ -1105,11 +1107,14 @@
                 $('list-title').textContent = titles[sort];
                 activate('sort-tabs', 'sort', sort);
                 activate('list-periods', 'days', days);
-                const buyOrders = sort === 'buyValue';
-                $('list-periods').parentElement.hidden = buyOrders;
-                $('price-column').textContent = buyOrders ? 'Bid · gp' : 'Price · gp';
-                $('change-column').textContent = buyOrders ? 'Buy qty' : 'Change';
-                $('metric-column').textContent = buyOrders ? 'Buy value · gp' : sort === 'value' ? 'Trade value · gp' : 'Volume';
+                const buyOrders = sort === 'buyValue',
+                    sellOrders = sort === 'sellRecent',
+                    orders = buyOrders || sellOrders;
+                $('list-periods').parentElement.hidden = orders;
+                $('price-column').textContent = buyOrders ? 'Bid · gp' : sellOrders ? 'Ask · gp' : 'Price · gp';
+                $('change-column').textContent = buyOrders ? 'Buy qty' : sellOrders ? 'Sell qty' : 'Change';
+                $('metric-column').textContent = buyOrders ? 'Buy value · gp' : sellOrders ? 'Sell value · gp' : sort === 'value' ? 'Trade value · gp' : 'Volume';
+                $('time-column').textContent = sellOrders ? 'Last listed' : 'Last traded';
                 try {
                     const d = await api('?' + new URLSearchParams({ q: $('search').value, limit, offset, sort, days }));
                     if (seq !== listSequence) return;
@@ -1121,14 +1126,17 @@
                     }
                     $('items').innerHTML = d.items.length
                         ? d.items
-                              .map(
-                                  item =>
-                                      `<tr data-item="${item.id}"><td><a class="itemlink" href="${escape(itemHash(item.id))}">${sprite(item.id)}<span>${escape(item.name)}</span></a></td>
-                                      <td title="${fmt(buyOrders ? item.bid : item.lastPrice)} gp">${short(buyOrders ? item.bid : item.lastPrice)}</td>
-                                      <td class="${buyOrders ? '' : 'change ' + tone(item.changePercent)}" title="${buyOrders ? fmt(item.buyQuantity) : ''}">${buyOrders ? short(item.buyQuantity) : changeText(item.changePercent)}</td>
-                                      <td title="${fmt(buyOrders ? item.buyValue : sort === 'value' ? item.gross : item.volume)}">${short(buyOrders ? item.buyValue : sort === 'value' ? item.gross : item.volume)}</td>
-                                      <td class="recent" title="${item.lastTradeAt ? new Date(item.lastTradeAt).toLocaleString() : 'No completed trades'}">${relative(item.lastTradeAt)}</td></tr>`
-                              )
+                              .map(item => {
+                                  const price = buyOrders ? item.bid : sellOrders ? item.ask : item.lastPrice,
+                                      quantity = buyOrders ? item.buyQuantity : item.sellQuantity,
+                                      metric = buyOrders ? item.buyValue : sellOrders ? item.sellValue : sort === 'value' ? item.gross : item.volume,
+                                      time = sellOrders ? item.lastSellAt : item.lastTradeAt;
+                                  return `<tr data-item="${item.id}"><td><a class="itemlink" href="${escape(itemHash(item.id))}">${sprite(item.id)}<span>${escape(item.name)}</span></a></td>
+                                      <td title="${fmt(price)} gp">${short(price)}</td>
+                                      <td class="${orders ? '' : 'change ' + tone(item.changePercent)}" title="${orders ? fmt(quantity) : ''}">${orders ? short(quantity) : changeText(item.changePercent)}</td>
+                                      <td title="${fmt(metric)}">${short(metric)}</td>
+                                      <td class="recent" title="${time != null ? new Date(time).toLocaleString() : 'No completed trades'}">${relative(time)}</td></tr>`;
+                              })
                               .join('')
                         : '<tr><td colspan="5" class="empty">No results</td></tr>';
                     bindImages($('items'));
@@ -1347,7 +1355,7 @@
                     history.replaceState(null, '', '#' + params);
                 }
                 sort = location.hash === '#browse' ? 'name' : Object.hasOwn(titles, params.get('sort')) ? params.get('sort') : 'recent';
-                days = [1, 7, 30, 90].includes(Number(params.get('days'))) ? Number(params.get('days')) : 1;
+                days = [1, 7, 30, 90].includes(Number(params.get('days'))) ? Number(params.get('days')) : 7;
                 const requestedOffset = Number(params.get('offset'));
                 offset = Number.isFinite(requestedOffset) ? Math.floor(Math.min(100000, Math.max(0, requestedOffset)) / limit) * limit : 0;
                 $('search').value = (params.get('q') || '').slice(0, 80);

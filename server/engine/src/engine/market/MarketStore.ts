@@ -13,6 +13,8 @@ export type MarketOverview = {
     buyQuantity: number;
     buyValue: number;
     sellQuantity: number;
+    sellValue: number;
+    lastSellAt: number | null;
     volume: number;
     gross: number;
     tax: number;
@@ -210,12 +212,14 @@ export class MarketStore {
     }
     quote(item: number, since = Date.now() - 86_400_000) {
         const book = this.db
-            .query<{ bid: number | null; ask: number | null; buyQuantity: number; buyValue: number; sellQuantity: number }, [number]>(
+            .query<{ bid: number | null; ask: number | null; buyQuantity: number; buyValue: number; sellQuantity: number; sellValue: number; lastSellAt: number | null }, [number]>(
                 `SELECT
             MAX(CASE WHEN side='buy' THEN price END) bid, MIN(CASE WHEN side='sell' THEN price END) ask,
             COALESCE(SUM(CASE WHEN side='buy' THEN remaining ELSE 0 END),0) buyQuantity,
             COALESCE(SUM(CASE WHEN side='buy' THEN remaining * price ELSE 0 END),0) buyValue,
-            COALESCE(SUM(CASE WHEN side='sell' THEN remaining ELSE 0 END),0) sellQuantity
+            COALESCE(SUM(CASE WHEN side='sell' THEN remaining ELSE 0 END),0) sellQuantity,
+            COALESCE(SUM(CASE WHEN side='sell' THEN remaining * price ELSE 0 END),0) sellValue,
+            MAX(CASE WHEN side='sell' AND remaining>0 THEN created END) lastSellAt
             FROM offers WHERE item=? AND state='open'`
             )
             .get(item)!;
@@ -248,12 +252,15 @@ export class MarketStore {
                 MAX(CASE WHEN side='buy' THEN price END) bid, MIN(CASE WHEN side='sell' THEN price END) ask,
                 SUM(CASE WHEN side='buy' THEN remaining ELSE 0 END) buyQuantity,
                 SUM(CASE WHEN side='buy' THEN remaining * price ELSE 0 END) buyValue,
-                SUM(CASE WHEN side='sell' THEN remaining ELSE 0 END) sellQuantity
+                SUM(CASE WHEN side='sell' THEN remaining ELSE 0 END) sellQuantity,
+                SUM(CASE WHEN side='sell' THEN remaining * price ELSE 0 END) sellValue,
+                MAX(CASE WHEN side='sell' AND remaining>0 THEN created END) lastSellAt
                 FROM offers WHERE state='open' GROUP BY item),
             period AS (SELECT item,SUM(quantity) volume,SUM(gross) gross,SUM(tax) tax,COUNT(*) trades
                 FROM trades WHERE time>=? AND time<? GROUP BY item)
             SELECT a.item,b.bid,b.ask,COALESCE(b.buyQuantity,0) buyQuantity,COALESCE(b.sellQuantity,0) sellQuantity,
                 COALESCE(b.buyValue,0) buyValue,
+                COALESCE(b.sellValue,0) sellValue,b.lastSellAt,
                 COALESCE(p.volume,0) volume,COALESCE(p.gross,0) gross,COALESCE(p.tax,0) tax,COALESCE(p.trades,0) trades,
                 (SELECT price FROM trades WHERE item=a.item AND time<? ORDER BY time DESC,id DESC LIMIT 1) lastPrice,
                 (SELECT time FROM trades WHERE item=a.item AND time<? ORDER BY time DESC,id DESC LIMIT 1) lastTradeAt,

@@ -296,6 +296,27 @@ describe('Grand Exchange conservation and matching', () => {
 });
 
 describe('Market overview metrics', () => {
+    test('sell recency and value track remaining open offers through fills and cancellation', () => {
+        const s = store();
+        const first = s.place(new Wallet('older', 0, 5).account(), ITEM, 'sell', 5, 100, COINS);
+        const second = s.place(new Wallet('newer', 0, 3).account(), ITEM, 'sell', 3, 200, COINS);
+        s.db.query('UPDATE offers SET created=? WHERE id=?').run(1000, first.id);
+        s.db.query('UPDATE offers SET created=? WHERE id=?').run(2000, second.id);
+        const row = () => s.overview(0, Date.now() + 1)[0]!;
+        expect(row().lastSellAt).toBe(2000);
+        expect(row().sellValue).toBe(1100);
+        s.place(new Wallet('buyer', 200).account(), ITEM, 'buy', 2, 100, COINS);
+        expect(row().sellQuantity).toBe(6);
+        expect(row().sellValue).toBe(900);
+        expect(row().lastSellAt).toBe(2000);
+        s.cancel('newer', second.id);
+        expect(row().lastSellAt).toBe(1000);
+        expect(row().sellValue).toBe(300);
+        s.place(new Wallet('buyer2', 300).account(), ITEM, 'buy', 3, 100, COINS);
+        expect(row().sellQuantity).toBe(0);
+        expect(row().sellValue).toBe(0);
+        expect(row().lastSellAt).toBeNull();
+    });
     test('buy value sums unfilled commitments at each bid price and drops after fills and cancellations', () => {
         const s = store();
         const a = new Wallet('a', 1000),

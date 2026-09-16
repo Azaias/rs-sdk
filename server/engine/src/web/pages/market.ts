@@ -13,7 +13,7 @@ function snapshot(days: number) {
     return result;
 }
 function period(url: URL) {
-    const days = integer(url, 'days', 1, 1, 90);
+    const days = integer(url, 'days', 7, 1, 90);
     if (![1, 7, 30, 90].includes(days)) throw new Error('Invalid days: use 1, 7, 30 or 90.');
     return days;
 }
@@ -46,7 +46,7 @@ export function handleMarket(req: Request, url: URL): Response | null {
                 offset = integer(url, 'offset', 0, 0, 100_000);
             const days = period(url),
                 sort = url.searchParams.get('sort') ?? (q.trim() ? 'relevance' : 'name');
-            if (!['relevance', 'name', 'name-desc', 'recent', 'rises', 'falls', 'marketCap', 'price', 'volume', 'value', 'buyValue'].includes(sort)) throw new Error('Invalid sort.');
+            if (!['relevance', 'name', 'name-desc', 'recent', 'rises', 'falls', 'marketCap', 'price', 'volume', 'value', 'buyValue', 'sellRecent'].includes(sort)) throw new Error('Invalid sort.');
             const data = snapshot(days),
                 byId = new Map(data.rows.map(row => [row.item, row]));
             const empty = {
@@ -55,6 +55,8 @@ export function handleMarket(req: Request, url: URL): Response | null {
                 buyQuantity: 0,
                 buyValue: 0,
                 sellQuantity: 0,
+                sellValue: 0,
+                lastSellAt: null,
                 volume: 0,
                 gross: 0,
                 tax: 0,
@@ -72,10 +74,11 @@ export function handleMarket(req: Request, url: URL): Response | null {
             if (sort === 'falls') matches = matches.filter(i => i.changePercent !== null && i.changePercent < 0 && i.volume > 0);
             if (sort === 'marketCap') matches = matches.filter(i => i.marketCap !== null && i.marketCap > 0);
             if (sort === 'buyValue') matches = matches.filter(i => i.buyValue > 0);
+            if (sort === 'sellRecent') matches = matches.filter(i => i.sellQuantity > 0 && i.lastSellAt !== null);
             if (sort === 'price') matches = matches.filter(i => i.lastPrice !== null);
             if (sort === 'recent') matches = matches.filter(i => i.lastTradeAt !== null);
             if (sort === 'volume' || sort === 'value') matches = matches.filter(i => i.volume > 0);
-            const sortKeys = { recent: 'lastTradeAt', rises: 'changePercent', falls: 'changePercent', marketCap: 'marketCap', price: 'lastPrice', volume: 'volume', value: 'gross', buyValue: 'buyValue' } as const;
+            const sortKeys = { recent: 'lastTradeAt', rises: 'changePercent', falls: 'changePercent', marketCap: 'marketCap', price: 'lastPrice', volume: 'volume', value: 'gross', buyValue: 'buyValue', sellRecent: 'lastSellAt' } as const;
             const key = sortKeys[sort as keyof typeof sortKeys];
             if (key) matches.sort((a, b) => ((b[key] ?? -Infinity) - (a[key] ?? -Infinity)) * (sort === 'falls' ? -1 : 1) || a.name.localeCompare(b.name) || a.id - b.id);
             const eligible = new Set(catalog().map(i => i.id)),

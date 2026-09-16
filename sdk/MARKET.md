@@ -153,14 +153,16 @@ No authentication is required. Responses may be cached for five seconds.
 | `/api/market/items/{id}` | Canonical, unnoted tradeable item ID | `MarketQuote` |
 | `/api/market/items/{id}/history` | `from`, `to`: Unix milliseconds; `interval`: 3600000 (hour) or 86400000 (day) | `{ item, from, to, interval, history }` |
 
-The list and item endpoints also accept `days=1|7|30|90` (default `1`).
-The list accepts `sort=relevance|name|name-desc|recent|rises|falls|marketCap|price|volume|value|buyValue`
+The list and item endpoints also accept `days=1|7|30|90` (default `7`).
+The list accepts `sort=relevance|name|name-desc|recent|rises|falls|marketCap|price|volume|value|buyValue|sellRecent`
 (default `relevance` when searching, `name` otherwise). Rankings apply before pagination;
 `rises`/`falls` include only positive/negative changes with trades in the period.
 `price` ranks by last unit price, `volume` by units traded, and `value` by gross
 trade value. `buyValue` ranks the current open buy book by the sum of remaining
 quantity × bid price for each item, including items without completed trades.
 This value is independent of `days` and excludes filled and cancelled quantities.
+`sellRecent` lists items with open sell offers, newest listing first; like
+`buyValue` it describes the current book and ignores `days`.
 Search filters the chosen ranking. The response also includes
 `days`, `sort`, `updatedAt`, a market-wide `summary` (`volume`, `gross`,
 `activeItems`, `totalItems`), and the most-traded `featured` item, or `null`.
@@ -194,8 +196,10 @@ are omitted, never filled with invented prices or volume.
 | `bid`, `ask` | Highest open buy limit / lowest open sell limit; `null` if absent |
 | `buyQuantity`, `sellQuantity` | Remaining quantities in open offers |
 | `buyValue` | Total gp committed to unfilled open buy offers, at each offer’s bid price |
+| `sellValue` | Total gp asked for unfilled open sell offers, at each offer’s ask price |
+| `lastSellAt` | Creation time of the newest open sell offer (Unix ms), or `null` |
 | `lastPrice`, `lastTradeAt` | Most recent execution price and Unix milliseconds, or `null` |
-| `volume` | Actual item units exchanged in the selected period (24 hours by default) |
+| `volume` | Actual item units exchanged in the selected period (7 days by default) |
 | `gross`, `tax`, `trades` | Selected-period gross coins, coins burned, and number of matched fills |
 | `vwap` | Selected-period quantity-weighted average price; `null` without trades |
 

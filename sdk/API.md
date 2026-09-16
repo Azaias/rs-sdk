@@ -1021,9 +1021,13 @@ interface MarketQuote {
   /** Coins committed to unfilled bids, independent of the selected period. */
   buyValue: number;
   sellQuantity: number;
-  /** Completed item quantity in the selected period (24 hours by default). */
+  /** Coins asked for unfilled sell offers, independent of the selected period. */
+  sellValue: number;
+  /** Newest open sell offer creation time (Unix ms), or null without open asks. */
+  lastSellAt: number | null;
+  /** Completed item quantity in the selected period (7 days by default). */
   volume: number;
-  /** Gross coins exchanged in the selected period (24 hours by default). */
+  /** Gross coins exchanged in the selected period (7 days by default). */
   gross: number;
   tax: number;
   trades: number;

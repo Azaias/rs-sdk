@@ -42,6 +42,13 @@ test('HTTP rankings, search, pagination and item details use the same period met
     buyOffer.run(feather, 50, 100, 50, now);
     buyOffer.run(logs, 10, 70, 10, now);
     buyOffer.run(iron, 20, 5, 20, now);
+    const sellOffer = marketStore().db.query("INSERT INTO offers(owner,slot,item,side,quantity,price,remaining,created,state) VALUES('private-seller',-1,?,'sell',3,?,3,?,?)");
+    sellOffer.run(logs, 1000, now - 2000, 'open');
+    sellOffer.run(feather, 200, now - 1000, 'open');
+    sellOffer.run(logs, 1200, now - 5000, 'open');
+    sellOffer.run(iron, 100, now + 1000, 'cancelled');
+    sellOffer.run(logs, 900, now + 2000, 'cancelled');
+    sellOffer.run(logs, 800, now + 3000, 'completed');
     const ranked = async (sort: string, extra = '') => await request('/api/market/items?days=7&sort=' + sort + extra).json();
     expect((await ranked('recent')).items[0].id).toBe(iron);
     const buys = await ranked('buyValue');
@@ -53,6 +60,19 @@ test('HTTP rankings, search, pagination and item details use the same period met
     expect((await request('/api/market/items?sort=buyValue&days=1').json()).items[0].buyValue).toBe(5000);
     expect((await request('/api/market/items/' + feather + '?days=7').json()).buyValue).toBe(5000);
     expect(JSON.stringify(buys)).not.toContain('private-buyer');
+
+    const sells = await ranked('sellRecent');
+    expect(sells.items.map((i: { id: number }) => i.id)).toEqual([coal, feather, logs]);
+    expect(sells.items.map((i: { lastSellAt: number }) => i.lastSellAt)).toEqual([now, now - 1000, now - 2000]);
+    expect(sells.items.map((i: { ask: number }) => i.ask)).toEqual([500, 200, 1000]);
+    expect(sells.items[1].lastTradeAt).toBeNull();
+    expect(sells.items[2].sellQuantity).toBe(6);
+    expect(sells.items[2].sellValue).toBe(6600);
+    expect((await ranked('sellRecent', '&limit=1&offset=1')).items[0].id).toBe(feather);
+    expect((await ranked('sellRecent', '&q=logs')).items.map((i: { id: number }) => i.id)).toEqual([logs]);
+    expect((await ranked('sellRecent', '&q=iron')).total).toBe(0);
+    expect((await request('/api/market/items?sort=sellRecent&days=1').json()).items.map((i: { id: number }) => i.id)).toEqual([coal, feather, logs]);
+    expect(JSON.stringify(sells)).not.toContain('private-seller');
 
     expect((await ranked('rises')).items[0].id).toBe(coal);
     const falls = await ranked('falls');
