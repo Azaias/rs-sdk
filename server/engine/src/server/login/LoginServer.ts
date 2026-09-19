@@ -79,16 +79,24 @@ async function hashPassword(password: string): Promise<string> {
     return bcrypt.hash(password, 10);
 }
 
-async function updateHiscores(account: { id: number; staffmodlevel: number; banned_until: string | Date | null } | undefined, player: Player, profile: string) {
-    if (!account) return;
+type HiscoreAccount = { id: number; staffmodlevel: number; banned_until: string | Date | null };
+
+function hiscoreEligible(account: HiscoreAccount | undefined): account is HiscoreAccount {
+    if (!account) return false;
 
     if (account.staffmodlevel > 1) {
-        return;
+        return false;
     }
 
     if (account.banned_until !== null && new Date(account.banned_until) >= new Date()) {
-        return;
+        return false;
     }
+
+    return true;
+}
+
+async function updateHiscores(account: HiscoreAccount | undefined, player: Player, profile: string) {
+    if (!hiscoreEligible(account)) return;
 
     const insert = [];
     const update = [];
@@ -173,6 +181,13 @@ async function updateHiscores(account: { id: number; staffmodlevel: number; bann
         await db.updateTable('hiscore').set(update[i]).where('account_id', '=', account.id).where('type', '=', update[i].type).where('profile', '=', profile).execute();
     }
 
+    await updateWealthHiscores(account, player, profile);
+}
+
+// rs-sdk: outfit + bank boards are also refreshed on autosave (not just logout), so players who
+// stay online for days don't sit on a stale value. Autosave posts every online player in one
+// burst, so writes are skipped when the row hasn't changed - most banks don't move in 15 min.
+async function updateWealthHiscores(account: HiscoreAccount, player: Player, profile: string) {
     // Update outfit hiscore
     const worn = player.getInventory(InvType.WORN);
     if (worn) {
@@ -193,8 +208,10 @@ async function updateHiscores(account: { id: number; staffmodlevel: number; bann
 
         if (items.length > 0) {
             const itemsJson = JSON.stringify(items);
-            const existingOutfit = await db.selectFrom('hiscore_outfit').select('value').where('account_id', '=', account.id).where('profile', '=', profile).executeTakeFirst();
-            if (existingOutfit) {
+            const existingOutfit = await db.selectFrom('hiscore_outfit').select(['value', 'items']).where('account_id', '=', account.id).where('profile', '=', profile).executeTakeFirst();
+            if (existingOutfit && existingOutfit.value === totalValue && existingOutfit.items === itemsJson) {
+                // unchanged
+            } else if (existingOutfit) {
                 await db.updateTable('hiscore_outfit').set({ value: totalValue, items: itemsJson, date: toDbDate(new Date()) }).where('account_id', '=', account.id).where('profile', '=', profile).execute();
             } else {
                 await db.insertInto('hiscore_outfit').values({ account_id: account.id, profile, value: totalValue, items: itemsJson }).execute();
@@ -225,8 +242,10 @@ async function updateHiscores(account: { id: number; staffmodlevel: number; bann
                 // Sort by value descending so the most valuable items appear first
                 bankItems.sort((a, b) => b.value - a.value);
                 const bankItemsJson = JSON.stringify(bankItems);
-                const existingBank = await db.selectFrom('hiscore_bank').select('value').where('account_id', '=', account.id).where('profile', '=', profile).executeTakeFirst();
-                if (existingBank) {
+                const existingBank = await db.selectFrom('hiscore_bank').select(['value', 'items']).where('account_id', '=', account.id).where('profile', '=', profile).executeTakeFirst();
+                if (existingBank && existingBank.value === bankTotalValue && existingBank.items === bankItemsJson) {
+                    // unchanged
+                } else if (existingBank) {
                     await db.updateTable('hiscore_bank').set({ value: bankTotalValue, items: bankItemsJson, date: toDbDate(new Date()) }).where('account_id', '=', account.id).where('profile', '=', profile).execute();
                 } else {
                     await db.insertInto('hiscore_bank').values({ account_id: account.id, profile, value: bankTotalValue, items: bankItemsJson }).execute();
@@ -698,6 +717,15 @@ export default class LoginServer {
                             }
 
                             await fsp.writeFile(`data/players/${profile}/${username}.sav`, raw);
+
+                            try {
+                                const account = await db.selectFrom('account').select(['id', 'staffmodlevel', 'banned_until']).where('username', '=', username).executeTakeFirst();
+                                if (hiscoreEligible(account)) {
+                                    await updateWealthHiscores(account, PlayerLoading.load(username, new Packet(raw), null), profile);
+                                }
+                            } catch (err) {
+                                console.error(username, 'autosave hiscore update failed', err);
+                            }
                         } else {
                             console.error(username, 'Invalid save file');
                         }
