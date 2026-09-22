@@ -311,9 +311,7 @@ export class ActionHelpers {
         const startZ = startState.player.worldZ;
         const startTick = startState.tick;
 
-        const distance = Math.sqrt(
-            Math.pow(targetX - startX, 2) + Math.pow(targetZ - startZ, 2)
-        );
+        const distance = this.distance(startX, startZ, targetX, targetZ);
         const expectedTicks = Math.ceil(distance / TILES_PER_TICK);
         const maxTicks = Math.max(MIN_TICKS, Math.ceil(expectedTicks * 1.5));
 
@@ -336,7 +334,7 @@ export class ActionHelpers {
                 const s = this.sdk.getState()?.player;
                 const fx = s?.worldX ?? lastX;
                 const fz = s?.worldZ ?? lastZ;
-                const fd = Math.sqrt(Math.pow(targetX - fx, 2) + Math.pow(targetZ - fz, 2));
+                const fd = this.distance(fx, fz, targetX, targetZ);
                 done({ arrived: fd <= tolerance, stoppedMoving: true, x: fx, z: fz });
             }, SAFETY_MS);
 
@@ -348,9 +346,7 @@ export class ActionHelpers {
                 const currentTick = state.tick;
 
                 // Check arrival
-                const distToTarget = Math.sqrt(
-                    Math.pow(targetX - currentX, 2) + Math.pow(targetZ - currentZ, 2)
-                );
+                const distToTarget = this.distance(currentX, currentZ, targetX, targetZ);
                 if (distToTarget <= tolerance) {
                     done({ arrived: true, stoppedMoving: false, x: currentX, z: currentZ });
                     return;
@@ -400,9 +396,7 @@ export class ActionHelpers {
         const currentPos = { x: pos.worldX, z: pos.worldZ };
 
         // Check if arrived
-        const distToTarget = Math.sqrt(
-            Math.pow(targetX - currentPos.x, 2) + Math.pow(targetZ - currentPos.z, 2)
-        );
+        const distToTarget = this.distance(currentPos.x, currentPos.z, targetX, targetZ);
         if (distToTarget <= tolerance) {
             return { status: 'arrived', pos: currentPos };
         }
@@ -419,10 +413,12 @@ export class ActionHelpers {
     }
 
     /**
-     * Calculate distance between two points.
+     * Tile distance between two points - Chebyshev, the game's own metric.
+     * Adjacency (including diagonal) is 1, so a tolerance of 1 accepts a
+     * diagonally adjacent tile; the old Euclidean 1.41 rejected it.
      */
     distance(x1: number, z1: number, x2: number, z2: number): number {
-        return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(z2 - z1, 2));
+        return Math.max(Math.abs(x2 - x1), Math.abs(z2 - z1));
     }
 
     // ============ Specific Door Opening ============

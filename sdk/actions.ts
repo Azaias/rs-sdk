@@ -874,16 +874,19 @@ export class BotActions {
         const startTick = this.sdk.getState()?.tick || 0;
         const msgBaseline = this.helpers.getMessageTick();
 
+        // Success is *gaining* the item, tracked by its exact id. The ground
+        // publication also disappears when another player wins the pickup, so
+        // disappearance alone only stops the wait - see chopTree. Baseline
+        // BEFORE dispatch: the dispatch round-trip can outlast a tick, and a
+        // baseline taken afterwards already contained the item - fatal for
+        // static map spawns, which never leave the ground mirror.
+        const countBefore = countItems(this.sdk.getInventory(), item.id);
+
         // Now send the pickup command
         const result = await this.sdk.sendPickup(item.x, item.z, item.id);
         if (!result.success) {
             return { success: false, message: result.message };
         }
-
-        // Success is *gaining* the item, tracked by its exact id. The ground
-        // publication also disappears when another player wins the pickup, so
-        // disappearance alone only stops the wait - see chopTree.
-        const countBefore = countItems(this.sdk.getInventory(), item.id);
 
         try {
             const finalState = await this.sdk.waitForCondition(state => {
@@ -965,6 +968,14 @@ export class BotActions {
         const npcNow = this.helpers.refindNpcTarget(target, npc);
         if (!npcNow) {
             return { success: false, message: `${npc.name} no longer visible` };
+        }
+        // Talk-to needs adjacency. Dispatching it at an NPC the client cannot
+        // route to (two tiles away behind a house wall) queues an interaction
+        // the server keeps retrying, which blocks every later action. Refuse
+        // up front instead - the name fallback in resolveNpc can pick such a
+        // target when no reachable match exists.
+        if (npcNow.reachable === false) {
+            return { success: false, message: `${npc.name} is not reachable from here (wall or closed door in the way) - walk closer or open the door first` };
         }
 
         const startTick = this.sdk.getState()?.tick || 0;
@@ -1212,7 +1223,14 @@ export class BotActions {
                     }
                 }
 
-                const result = await this.helpers.walkStepToward(wp.x, wp.z, 2, pos);
+                // Intermediate waypoints only need to be passed near (2 tiles);
+                // the final one must honor the caller's tolerance, or a
+                // tolerance of 0/1 can never be met: the stepper reported
+                // "arrived" up to 2 tiles short, the outer check kept failing,
+                // and walkTo ended in "Stuck at" on open ground.
+                const isFinalWp = wp === path.waypoints[path.waypoints.length - 1];
+                const wpTolerance = isFinalWp ? Math.min(2, tolerance) : 2;
+                const result = await this.helpers.walkStepToward(wp.x, wp.z, wpTolerance, pos);
                 const deadMidStep = diedEnRoute();
                 if (deadMidStep) return deadMidStep;
                 if (distTo(result.pos) <= tolerance) return { success: true, message: 'Arrived' };
@@ -1284,6 +1302,13 @@ export class BotActions {
     /** Open a shop by trading with an NPC. Defaults to the nearest shopkeeper. */
     async openShop(target?: NearbyNpc | string | RegExp): Promise<ActionResult> {
         await this.dismissBlockingUI();
+
+        // A shop left open by a previous session never fires the open
+        // event this method waits for - it hung until the caller's own timeout.
+        const preState = this.sdk.getState();
+        if (preState?.shop.isOpen) {
+            return { success: true, message: `Shop already open: ${preState.shop.title}` };
+        }
 
         // Many shops are run by a named NPC (Bob's Brilliant Axes -> 'Bob'),
         // so with no explicit target, fall back from the /shop keeper/ name to
@@ -1808,7 +1833,30 @@ export class BotActions {
 
     /** Close the bank interface. */
     async closeBank(timeout: number = 5000): Promise<ActionResult> {
-        return this.closeInterface(timeout);
+        // bank.isOpen (the client's component-link check that gates inventory
+        // sends) can read true for a frame after interface.isOpen drops.
+        // closeInterface only looks at the latter, so a retry on that frame
+        // no-op'd with "already closed" while every item send was refused.
+        const state = this.sdk.getState();
+        if (!state?.interface?.isOpen && !state?.bank?.isOpen) {
+            return { success: true, message: 'Bank already closed' };
+        }
+
+        await this.sdk.sendCloseModal();
+        const closed = (s: { interface?: { isOpen: boolean }; bank?: { isOpen: boolean } }) =>
+            !s.interface?.isOpen && !s.bank?.isOpen;
+        try {
+            await this.sdk.waitForCondition(closed, timeout);
+            return { success: true, message: 'Bank closed' };
+        } catch {
+            await this.sdk.sendCloseModal();
+            await this.sdk.waitForTicks(1);
+            const finalState = this.sdk.getState();
+            if (finalState && closed(finalState)) {
+                return { success: true, message: 'Bank closed (second attempt)' };
+            }
+            return { success: false, message: `Bank close timeout - interface.isOpen=${finalState?.interface?.isOpen}, bank.isOpen=${finalState?.bank?.isOpen}` };
+        }
     }
 
     /**
@@ -1842,15 +1890,31 @@ export class BotActions {
             if (matchingIds.length > 1) {
                 let totalDeposited = 0;
                 const names: string[] = [];
+                const failures: string[] = [];
+                let lastFailure: BankDepositResult | null = null;
                 for (const id of matchingIds) {
                     const slotItem = this.sdk.getInventory().find(i => i.id === id);
                     if (!slotItem) continue;
                     const one = await this.depositItem(slotItem, -1);
                     totalDeposited += one.amountDeposited ?? 0;
                     names.push(slotItem.name);
+                    // One id failing (item_not_found under state lag, a
+                    // full bank slot) used to abort the loop and leave the
+                    // remaining matches in the bag. Keep going and report
+                    // the aggregate instead.
                     if (!one.success) {
-                        return { ...one, amountDeposited: totalDeposited, message: `Deposited ${totalDeposited} across ${names.join(', ')}; stopped: ${one.message}` };
+                        failures.push(`${slotItem.name}: ${one.message}`);
+                        lastFailure = one;
                     }
+                }
+                if (lastFailure) {
+                    return {
+                        ...lastFailure,
+                        success: false,
+                        partial: totalDeposited > 0,
+                        amountDeposited: totalDeposited,
+                        message: `Deposited ${totalDeposited} across ${names.join(', ')}; failed: ${failures.join('; ')}`,
+                    };
                 }
                 return {
                     success: true,
@@ -2720,13 +2784,18 @@ export class BotActions {
         return this.sdk.findEquipmentItem(pattern);
     }
 
-    /** Eat food to restore hitpoints. */
-    async eatFood(target: InventoryItem | string | RegExp): Promise<EatResult> {
+    /** Eat food to restore hitpoints. With no target, eats the first inventory item that offers Eat. */
+    async eatFood(target?: InventoryItem | string | RegExp): Promise<EatResult> {
         await this.dismissBlockingUI();
 
-        const food = this.helpers.resolveInventoryItem(target, /./);
+        // No target used to fall through to a match-anything pattern and
+        // "eat" slot 0 - reporting "No eat option on Coins" while the bag
+        // held salmon. Default to something that actually publishes Eat.
+        const food = target === undefined
+            ? this.sdk.getInventory().find(i => i.optionsWithIndex.some(o => /^eat$/i.test(o.text))) ?? null
+            : this.helpers.resolveInventoryItem(target, /./);
         if (!food) {
-            return { success: false, hpGained: 0, message: `Food not found: ${target}` };
+            return { success: false, hpGained: 0, message: target === undefined ? 'No edible item in inventory' : `Food not found: ${target}` };
         }
 
         // Drinkable healing items (Beer, wine, potions) publish 'Drink', not 'Eat'.
@@ -3470,7 +3539,9 @@ export class BotActions {
             return { success: false, message: 'No needle in inventory', reason: 'no_needle' };
         }
 
-        const leather = this.sdk.findInventoryItem(/^leather$/i);
+        // Plain, hard, or any dragon leather colour; plain first when several are carried.
+        const leather = this.sdk.findInventoryItem(/^leather$/i)
+            ?? this.sdk.findInventoryItem(/^(hard leather|(green|blue|red|black) dragon leather)$/i);
         if (!leather) {
             return { success: false, message: 'No leather in inventory', reason: 'no_leather' };
         }
@@ -3563,8 +3634,12 @@ export class BotActions {
 
             // Handle dialog
             if (state.dialog.isOpen) {
-                const craftOption = state.dialog.options.find(o =>
-                    /glove|make|craft|leather|body|chaps/i.test(o.text)
+                // Dragonhide dialogs list the product by colour ('Black body');
+                // a requested product must win over the generic first match.
+                const productRe = product ? new RegExp(product.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') : null;
+                const craftOption = (productRe && state.dialog.options.find(o => productRe.test(o.text)))
+                    || state.dialog.options.find(o =>
+                    /glove|make|craft|leather|body|chaps|vamb/i.test(o.text)
                 );
                 if (craftOption) {
                     await this.sdk.sendClickDialog(craftOption.index);
@@ -3956,10 +4031,24 @@ export class BotActions {
         // Re-find the location after walking (it may have changed). Keep a RegExp
         // target as-is so its anchors survive; an entity target re-finds by
         // identity so same-named neighbours (Varrock cart crates) can't win.
-        const locNow = target instanceof RegExp || typeof target === 'string'
-            ? this.helpers.resolveLocation(target, /./, optionFilter)
-            : this.helpers.refindLocation(loc)
-                ?? this.helpers.resolveLocation(exactNamePattern(loc.name), /./, optionFilter);
+        let locNow: NearbyLoc | null;
+        if (target instanceof RegExp || typeof target === 'string') {
+            locNow = this.helpers.resolveLocation(target, /./, optionFilter);
+        } else {
+            locNow = this.helpers.refindLocation(loc);
+            if (!locNow) {
+                // The passive nearbyLocs snapshot can lag a runtime loc_change
+                // (kalphite "Tunnel entrance" 3830 vs 3831 with the rope), so a
+                // caller-supplied loc from scanNearbyLocs may not refind. A
+                // same-named neighbour only wins if it actually offers the
+                // requested op; otherwise dispatch the caller's own object -
+                // sending a different loc id and reporting success cost four
+                // live runs to diagnose.
+                const fallback = this.helpers.resolveLocation(exactNamePattern(loc.name), /./, optionFilter);
+                const offersOp = fallback?.optionsWithIndex.some(o => o.opIndex === opIndex) ?? false;
+                locNow = fallback && offersOp ? fallback : loc;
+            }
+        }
         if (!locNow) {
             return { success: false, message: `${loc.name} no longer visible`, reason: 'loc_not_found' };
         }
@@ -4204,9 +4293,10 @@ export class BotActions {
             return { success: false, message: `NPC not found: ${target}`, reason: 'npc_not_found' };
         }
 
-        const pickOpt = npc.optionsWithIndex.find(o => /pickpocket/i.test(o.text));
+        // Some NPCs publish their steal op as 'Steal-from' (Digsite workmen).
+        const pickOpt = npc.optionsWithIndex.find(o => /pickpocket|steal/i.test(o.text));
         if (!pickOpt) {
-            return { success: false, message: `No pickpocket option on ${npc.name}`, reason: 'no_pickpocket_option' };
+            return { success: false, message: `No pickpocket/steal option on ${npc.name}`, reason: 'no_pickpocket_option' };
         }
 
         const thievingBefore = this.sdk.getSkill('Thieving')?.experience || 0;
@@ -4444,8 +4534,8 @@ export class BotActions {
     /**
      * Jewelry crafting interface (4161) component mapping.
      *
-     * Layout: 3 columns (ring, necklace, amulet), each with 5 gem slots:
-     *   slot 0 = plain gold, 1 = sapphire, 2 = emerald, 3 = ruby, 4 = diamond
+     * Layout: 3 columns (ring, necklace, amulet), each with 6 gem slots:
+     *   slot 0 = plain gold, 1 = sapphire, 2 = emerald, 3 = ruby, 4 = diamond, 5 = dragonstone
      */
     private static readonly JEWELRY_COMPONENTS: Record<string, number> = {
         'ring': 4233,
@@ -4460,6 +4550,7 @@ export class BotActions {
         'emerald': 2,
         'ruby': 3,
         'diamond': 4,
+        'dragonstone': 5,
     };
 
     /**
@@ -4530,7 +4621,12 @@ export class BotActions {
             gem = gemItem ? gemItem.name.toLowerCase() : 'gold';
         }
 
-        const gemSlot = BotActions.JEWELRY_GEM_SLOTS[gem] ?? 0;
+        const gemSlot = BotActions.JEWELRY_GEM_SLOTS[gem];
+        if (gemSlot === undefined) {
+            // An unknown gem string used to fall back to slot 0 and silently
+            // craft plain gold.
+            return { success: false, message: `Unknown gem '${gem}'. Use one of: ${Object.keys(BotActions.JEWELRY_GEM_SLOTS).join(', ')}`, reason: 'no_gem' };
+        }
 
         // Find furnace
         const furnace = this.sdk.findNearbyLoc(/furnace/i);

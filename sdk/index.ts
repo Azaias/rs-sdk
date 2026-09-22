@@ -823,7 +823,13 @@ export class BotSDK {
         return shortestNameMatch(this.state.inventory, pattern);
     }
 
-    /** Get all inventory items. */
+    /**
+     * Get all inventory items.
+     *
+     * The array is COMPACTED (empty slots are omitted), so its index is not
+     * the inventory slot. `sendUseItem` / `sendUseItemOnItem` / `sendDropItem`
+     * take slot numbers: always pass `item.slot`, never the array index.
+     */
     getInventory(): InventoryItem[] {
         return this.state?.inventory || [];
     }
@@ -1909,7 +1915,9 @@ export class BotSDK {
         if (message.type === 'sdk_state' && message.state) {
             // Filter out player chat messages unless showChat is enabled. Player
             // chat = public (types 1/2) and private (3/6/7); system/game messages
-            // (level-ups, combat, examines) always pass through.
+            // (level-ups, combat, examines) always pass through. Note this also
+            // hides DMs from getNewChat/waitForChat - keep showChat on (the
+            // default) for any bot that talks to other bots.
             if (this.config.showChat === false && message.state.gameMessages) {
                 message.state.gameMessages = message.state.gameMessages.filter(
                     msg => !isPlayerChat(msg.type)

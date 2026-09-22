@@ -187,9 +187,13 @@ describe('BotSDK chat surface (via handleMessage)', () => {
         expect(sdk.getChatFrom('').every(m => m.sender !== '')).toBe(true);
     });
 
-    test('showChat:false excludes player chat from history', () => {
+    test('showChat:false excludes player chat (public and private) from history', () => {
         const sdk = new BotSDK({ botUsername: 'test', showChat: false });
-        pushState(sdk, [msg(10, 'hello'), msg(11, 'sys', { type: 0, sender: '' })]);
+        pushState(sdk, [
+            msg(10, 'hello'),
+            msg(11, 'sys', { type: 0, sender: '' }),
+            msg(12, 'psst', { type: 3, sender: 'friend' }),
+        ]);
 
         const retained = sdk.getChat({ limit: 0, types: [0, 1, 2, 3, 6, 7] });
         expect(retained.every(m => m.type === 0)).toBe(true);
