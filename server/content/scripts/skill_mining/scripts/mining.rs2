@@ -140,6 +140,7 @@ if (random($chance) = ^true) {
         $output = perfect_gold_ore;
     }
     inv_add(inv, $output, 1);
+    if ($output = runite_ore) runite_mined(loc_coord); // rs-sdk: Lava Maze runite hiscores
     stat_advance(mining, db_getfield($data, mining_table:rock_exp, 0));
     mes("You manage to mine some <db_getfield($data, mining_table:ore_name, 0)>.");
     return;

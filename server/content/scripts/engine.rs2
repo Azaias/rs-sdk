@@ -1064,3 +1064,6 @@
 
 // rs-sdk: physical Grand Exchange booth interaction.
 [command,ge_open](coord $counter)
+
+// rs-sdk: runite ore mined from a rock; the engine counts the Lava Maze rocks toward the hiscores
+[command,runite_mined](coord $rock)

@@ -75,6 +75,7 @@ model hiscore_outfit {
     profile    String   @default("main")
     value      Int
     items      String
+    appearance String?  @db.Text
     date       DateTime @default(now()) @updatedAt
 
     @@id([account_id, profile])
@@ -150,18 +151,13 @@ model session_wealth {
     recipient_value   Int?
 }
 
-model koth_capture {
+model runite_mine {
     id Int @id @default(autoincrement())
 
     timestamp DateTime
     profile   String   @default("main")
     username  String
 
-    combat_level Int
-    contenders   Int
-    loadout      String @db.Text
-
-    @@index([username, timestamp])
     @@index([timestamp])
 }
 

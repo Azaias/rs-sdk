@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 import Environment from '#/util/Environment.js';
-import { handleHiscoresPage, handleHiscoresPlayerPage, handleHiscoresOutfitPage, handleHiscoresBankPage, handleHiscoresKothPage } from './pages/hiscores.js';
+import { handleHiscoresPage, handleHiscoresPlayerPage, handleHiscoresOutfitPage, handleHiscoresBankPage, handleHiscoresRunitePage } from './pages/hiscores.js';
 import { handlePublicFiles } from './pages/static.js';
 import { handleSpriteRequest } from './sprites/SpriteRenderer.js';
 
@@ -139,8 +139,8 @@ export function startHiscoresWeb() {
             const hiscoresBankResponse = await handleHiscoresBankPage(url);
             if (hiscoresBankResponse) return hiscoresBankResponse;
 
-            const hiscoresKothResponse = await handleHiscoresKothPage(url);
-            if (hiscoresKothResponse) return hiscoresKothResponse;
+            const hiscoresRuniteResponse = await handleHiscoresRunitePage(url);
+            if (hiscoresRuniteResponse) return hiscoresRuniteResponse;
 
             const spriteResponse = await handleSpriteRequest(url);
             if (spriteResponse) return spriteResponse;

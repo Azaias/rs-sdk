@@ -3,7 +3,7 @@ import { register } from 'prom-client';
 import Environment from '#/util/Environment.js';
 import World from '#/engine/World.js';
 import { handleClientPage, handleCacheEndpoints } from './pages/client.js';
-import { handleHiscoresPage, handleHiscoresPlayerPage, handleHiscoresOutfitPage, handleHiscoresBankPage, handleHiscoresKothPage } from './pages/hiscores.js';
+import { handleHiscoresPage, handleHiscoresPlayerPage, handleHiscoresOutfitPage, handleHiscoresBankPage, handleHiscoresRunitePage } from './pages/hiscores.js';
 import { handleViewerAssets } from './hiscoresServer.js';
 import { handleSpriteRequest } from './sprites/SpriteRenderer.js';
 import { handleScreenshotsListPage, handleScreenshotFilePage } from './pages/screenshots.js';
@@ -307,8 +307,8 @@ async function handleRequest(req: Request, server: Bun.Server, url: URL): Promis
             const hiscoresBankResponse = await handleHiscoresBankPage(url);
             if (hiscoresBankResponse) return hiscoresBankResponse;
 
-            const hiscoresKothResponse = await handleHiscoresKothPage(url);
-            if (hiscoresKothResponse) return hiscoresKothResponse;
+            const hiscoresRuniteResponse = await handleHiscoresRunitePage(url);
+            if (hiscoresRuniteResponse) return hiscoresRuniteResponse;
 
             const spriteResponse = await handleSpriteRequest(url);
             if (spriteResponse) return spriteResponse;

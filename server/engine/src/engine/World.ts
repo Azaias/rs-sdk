@@ -104,7 +104,6 @@ import VarBitType from '#/cache/config/VarBitType.js';
 import FriendlistLoaded from '#/network/game/server/model/FriendlistLoaded.js';
 import HashTable from '#/datastruct/HashTable.js';
 import Midi from '#/cache/midi/Midi.js';
-import Koth from '#/engine/Koth.js';
 
 const priv = forge.pki.privateKeyFromPem(fs.readFileSync('data/config/private.pem', 'ascii'));
 
@@ -488,16 +487,6 @@ class World {
                     if (heartbeat || player.x !== player.lastTelemetryX || player.z !== player.lastTelemetryZ || player.level !== player.lastTelemetryLevel) {
                         this.pendingTelemetry.push(this.buildTelemetryEvent(player));
                     }
-                }
-            }
-
-            {
-                const kothEvent = Koth.cycle(this.playerLoop.all());
-                if (kothEvent) {
-                    this.loggerThread.postMessage({
-                        type: 'koth_capture',
-                        event: kothEvent
-                    });
                 }
             }
 
@@ -2735,6 +2724,18 @@ class World {
             coord: player.coord,
             offender,
             reason
+        });
+    }
+
+    // rs-sdk: one row per runite ore mined from a leaderboard rock (hiscores /runite)
+    notifyRuniteMined(player: Player) {
+        this.loggerThread.postMessage({
+            type: 'runite_mine',
+            event: {
+                timestamp: Date.now(),
+                profile: Environment.node.profile,
+                username: player.username
+            }
         });
     }
 

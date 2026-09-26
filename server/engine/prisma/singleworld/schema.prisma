@@ -75,6 +75,7 @@ model hiscore_outfit {
     account_id Int
     value      Int
     items      String
+    appearance String?
     date       DateTime @default(now()) @updatedAt
 
     @@id([profile, account_id])
@@ -198,18 +199,13 @@ model player_skills_log {
     @@index([username, timestamp])
 }
 
-model koth_capture {
+model runite_mine {
     id Int @id @default(autoincrement())
 
     timestamp DateTime
     profile   String   @default("main")
     username  String
 
-    combat_level Int
-    contenders   Int
-    loadout      String
-
-    @@index([username, timestamp])
     @@index([timestamp])
 }
 

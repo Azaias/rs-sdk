@@ -49,11 +49,11 @@ async function handleRequests(_parentPort: ParentPort, msg: any) {
             await client.playerTelemetry(events);
             break;
         }
-        case 'koth_capture': {
-            // not gated on Environment.logger.enabled - koth control time is gameplay
+        case 'runite_mine': {
+            // not gated on Environment.logger.enabled - the runite leaderboard is gameplay
             // data (hiscores), not moderation logging
             const { event } = msg;
-            await client.kothCapture(event);
+            await client.runiteMine(event);
             break;
         }
         case 'report': {

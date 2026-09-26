@@ -2,7 +2,7 @@ import { db, toDbDate } from '#/db/query.js';
 import Environment from '#/util/Environment.js';
 import { tryParseInt } from '#/util/TryParse.js';
 import { escapeHtml, SKILL_NAMES, ENABLED_SKILLS } from '../utils.js';
-import { playerSpriteUrl } from '#/web/sprites/SpriteRenderer.js';
+import { itemSpriteUrl, playerSpriteUrl } from '#/web/sprites/SpriteRenderer.js';
 
 const hiddenNames = Environment.HISCORES_HIDDEN_NAMES;
 
@@ -131,6 +131,22 @@ function rankIn(rows: RankedRow[], username: string): number | null {
     const lower = username.toLowerCase();
     const idx = rows.findIndex(r => r.username.toLowerCase() === lower);
     return idx === -1 ? null : idx + 1;
+}
+
+// "Select hiscore table" sidebar shared by the list pages
+function hiscoreTableLinks(profile: string): string {
+    const skillOptions = [{ id: 0, name: 'Overall' }, ...ENABLED_SKILLS.map(s => ({ id: s.id + 1, name: s.name }))];
+    return (
+        skillOptions
+            .map(s => {
+                const icon = s.name === 'Overall' ? '' : `<img src="/img/skill/${s.name.toLowerCase()}.png" width="15" height="15" style="vertical-align:middle;margin-right:3px">`;
+                return `<tr><td><a href="/hiscores?category=${s.id}&profile=${profile}" class="c">${icon}${s.name}</a></td></tr>`;
+            })
+            .join('\n') +
+        `\n<tr><td>&nbsp;</td></tr>\n<tr><td><a href="/hiscores/outfit?profile=${profile}" class="c text-orange">Equipment</a></td></tr>` +
+        `\n<tr><td><a href="/hiscores/bank?profile=${profile}" class="c text-orange">Bank</a></td></tr>` +
+        `\n<tr><td><a href="/hiscores/runite?profile=${profile}" class="c text-orange">Lava Maze Runite</a></td></tr>`
+    );
 }
 
 // Player profile page handler
@@ -355,21 +371,7 @@ export async function handleHiscoresPage(url: URL): Promise<Response | null> {
         }
     }
 
-    const skillOptions = [{ id: 0, name: 'Overall' }, ...ENABLED_SKILLS.map(s => ({ id: s.id + 1, name: s.name }))];
-
     const currentCategory = category === -1 ? 0 : category;
-
-    // Build skill links for sidebar
-    const skillLinks =
-        skillOptions
-            .map(s => {
-                const icon = s.name === 'Overall' ? '' : `<img src="/img/skill/${s.name.toLowerCase()}.png" width="15" height="15" style="vertical-align:middle;margin-right:3px">`;
-                return `<tr><td><a href="/hiscores?category=${s.id}&profile=${profile}" class="c">${icon}${s.name}</a></td></tr>`;
-            })
-            .join('\n') +
-        `\n<tr><td>&nbsp;</td></tr>\n<tr><td><a href="/hiscores/outfit?profile=${profile}" class="c text-orange">Equipment</a></td></tr>` +
-        `\n<tr><td><a href="/hiscores/bank?profile=${profile}" class="c text-orange">Bank</a></td></tr>` +
-        `\n<tr><td><a href="/hiscores/koth?profile=${profile}" class="c text-orange">King of the Hill</a></td></tr>`;
 
     // Build data rows
     const rankCol = rows.map(r => `${r.rank}<br>`).join('\n');
@@ -458,7 +460,7 @@ export async function handleHiscoresPage(url: URL): Promise<Response | null> {
                                         <td class="e" valign="top">
                                             <center>
                                                 <table height="380" cellspacing="1" cellpadding="0">
-                                                    ${skillLinks}
+                                                    ${hiscoreTableLinks(profile)}
                                                 </table>
                                             </center>
                                         </td>
@@ -611,6 +613,17 @@ export async function handleHiscoresPage(url: URL): Promise<Response | null> {
     return new Response(html, { headers: { 'Content-Type': 'text/html' } });
 }
 
+// Character sprite wearing the outfit, from the appearance the login server stores with the
+// row (null until the player's next save after the column was added)
+function outfitSprite(appearance: string | null): string {
+    if (!appearance) return '';
+    try {
+        return `<img src="${playerSpriteUrl(JSON.parse(appearance), 52, 88)}" width="52" height="88" alt="" loading="lazy" decoding="async" style="image-rendering:pixelated;vertical-align:middle">`;
+    } catch {
+        return '';
+    }
+}
+
 // Richest outfit leaderboard handler
 export async function handleHiscoresOutfitPage(url: URL): Promise<Response | null> {
     const match = url.pathname.match(/^\/hi(?:gh)?scores\/outfit\/?$/);
@@ -621,7 +634,7 @@ export async function handleHiscoresOutfitPage(url: URL): Promise<Response | nul
     let query = db
         .selectFrom('hiscore_outfit')
         .innerJoin('account', 'account.id', 'hiscore_outfit.account_id')
-        .select(['account.username', 'hiscore_outfit.value', 'hiscore_outfit.items'])
+        .select(['account.username', 'hiscore_outfit.value', 'hiscore_outfit.items', 'hiscore_outfit.appearance'])
         .where('hiscore_outfit.profile', '=', profile)
         .where('account.staffmodlevel', '<=', 1)
         .orderBy('hiscore_outfit.value', 'desc')
@@ -632,14 +645,16 @@ export async function handleHiscoresOutfitPage(url: URL): Promise<Response | nul
 
     const results = await query.execute();
 
+    // sprites and icons are rendered server-side (see web/sprites) and cached by URL
     const rows = results.map((r, i) => {
         let itemsList = '';
         try {
             const items = JSON.parse(r.items) as { id?: number; name: string; value: number }[];
             itemsList = items
                 .map(item => {
+                    const title = `${escapeHtml(item.name)} (${item.value.toLocaleString()} gp)`;
                     if (item.id != null) {
-                        return `<canvas class="item-icon" data-item-id="${item.id}" title="${escapeHtml(item.name)} (${item.value.toLocaleString()} gp)" width="32" height="32" style="image-rendering:pixelated;vertical-align:middle"></canvas>`;
+                        return `<img src="${itemSpriteUrl(item.id)}" title="${title}" alt="${escapeHtml(item.name)}" width="32" height="32" loading="lazy" style="image-rendering:pixelated;vertical-align:middle">`;
                     }
                     return `<span title="${item.value.toLocaleString()} gp">${escapeHtml(item.name)}</span>`;
                 })
@@ -650,25 +665,13 @@ export async function handleHiscoresOutfitPage(url: URL): Promise<Response | nul
         return `
             <tr>
                 <td align="right">${i + 1}</td>
+                <td>${i < 10 ? outfitSprite(r.appearance) : ''}</td>
                 <td><a href="/hiscores/player/${encodeURIComponent(r.username)}?profile=${profile}" class="c">${escapeHtml(r.username)}</a></td>
                 <td align="right" class="yellow" title="${r.value.toLocaleString()} gp">${formatGold(r.value)}</td>
                 <td style="font-size:11px">${itemsList}</td>
             </tr>
         `;
     });
-
-    // Sidebar skill links
-    const skillOptions = [{ id: 0, name: 'Overall' }, ...ENABLED_SKILLS.map(s => ({ id: s.id + 1, name: s.name }))];
-    const skillLinks =
-        skillOptions
-            .map(s => {
-                const icon = s.name === 'Overall' ? '' : `<img src="/img/skill/${s.name.toLowerCase()}.png" width="15" height="15" style="vertical-align:middle;margin-right:3px">`;
-                return `<tr><td><a href="/hiscores?category=${s.id}&profile=${profile}" class="c">${icon}${s.name}</a></td></tr>`;
-            })
-            .join('\n') +
-        `\n<tr><td>&nbsp;</td></tr>\n<tr><td><a href="/hiscores/outfit?profile=${profile}" class="c text-orange">Equipment</a></td></tr>` +
-        `\n<tr><td><a href="/hiscores/bank?profile=${profile}" class="c text-orange">Bank</a></td></tr>` +
-        `\n<tr><td><a href="/hiscores/koth?profile=${profile}" class="c text-orange">King of the Hill</a></td></tr>`;
 
     const html = `<!DOCTYPE html>
 <html>
@@ -722,7 +725,7 @@ export async function handleHiscoresOutfitPage(url: URL): Promise<Response | nul
                                         <td class="e" valign="top">
                                             <center>
                                                 <table height="380" cellspacing="1" cellpadding="0">
-                                                    ${skillLinks}
+                                                    ${hiscoreTableLinks(profile)}
                                                 </table>
                                             </center>
                                         </td>
@@ -742,6 +745,7 @@ export async function handleHiscoresOutfitPage(url: URL): Promise<Response | nul
                                                     ? `<table width="100%" cellspacing="2" cellpadding="2">
                                                 <tr>
                                                     <td><b>#</b></td>
+                                                    <td></td>
                                                     <td><b>Name</b></td>
                                                     <td align="right"><b>Value</b></td>
                                                     <td><b>Items</b></td>
@@ -778,100 +782,14 @@ export async function handleHiscoresOutfitPage(url: URL): Promise<Response | nul
         </td>
     </tr>
 </table>
-<!-- Hidden canvas required by viewer internals -->
-<canvas id="canvas" width="256" height="256" style="display:none"></canvas>
-<script type="module">
-    import { ItemViewer } from '/viewer/viewer.js';
-
-    const icons = document.querySelectorAll('canvas.item-icon');
-    if (icons.length > 0) {
-        const viewer = new ItemViewer();
-        try {
-            await viewer.init('');
-            let rendered = 0, failed = 0;
-            for (const el of icons) {
-                const id = parseInt(el.dataset.itemId);
-                if (isNaN(id)) continue;
-                try {
-                    const icon = viewer.renderItemIconAsImageData(id);
-                    if (icon) {
-                        el.getContext('2d').putImageData(icon, 0, 0);
-                        rendered++;
-                    } else {
-                        el.style.display = 'none';
-                        const fallback = document.createElement('span');
-                        fallback.textContent = el.title.split(' (')[0];
-                        fallback.title = el.title;
-                        el.parentNode.insertBefore(fallback, el);
-                        failed++;
-                    }
-                } catch (renderErr) {
-                    failed++;
-                }
-            }
-        } catch (err) {
-            console.error('ItemViewer init failed:', err);
-            for (const el of icons) {
-                const fallback = document.createElement('span');
-                fallback.textContent = el.title.split(' (')[0];
-                fallback.title = el.title;
-                el.parentNode.insertBefore(fallback, el);
-                el.style.display = 'none';
-            }
-        }
-    }
-</script>
 </body>
 </html>`;
 
     return new Response(html, { headers: { 'Content-Type': 'text/html' } });
 }
 
-// King of the Hill (Demonic Ruins) leaderboard handler.
-// A loadout snapshot is the appearance-protocol encoding the engine captured:
-// 12 slots of 0 (empty) / 0x100+idk / 0x200+objId, plus gender and 5 colours.
-type KothLoadout = { gender: number; colors: number[]; slots: number[] };
-
-// per-component mode across a player's capture snapshots: the outfit they
-// characteristically held the hill in ("median" loadout)
-function medianLoadout(loadouts: string[]): KothLoadout | null {
-    const parsed: KothLoadout[] = [];
-    for (const raw of loadouts) {
-        try {
-            const l = JSON.parse(raw);
-            if (l && Array.isArray(l.colors) && Array.isArray(l.slots)) {
-                parsed.push(l);
-            }
-        } catch {
-            // skip malformed snapshots
-        }
-    }
-    if (parsed.length === 0) {
-        return null;
-    }
-
-    const mode = (values: number[]): number => {
-        const counts = new Map<number, number>();
-        let best = values[0];
-        let bestCount = 0;
-        for (const v of values) {
-            const c = (counts.get(v) ?? 0) + 1;
-            counts.set(v, c);
-            if (c > bestCount) {
-                bestCount = c;
-                best = v;
-            }
-        }
-        return best;
-    };
-
-    return {
-        gender: mode(parsed.map(l => l.gender)),
-        colors: parsed[0].colors.map((_, i) => mode(parsed.map(l => l.colors[i] ?? 0))),
-        slots: parsed[0].slots.map((_, i) => mode(parsed.map(l => l.slots[i] ?? 0)))
-    };
-}
-
+// Lava Maze runite leaderboard: one runite_mine row per ore mined from the two Lava Maze
+// rocks (see RUNITE_MINED in DebugOps.ts)
 function formatAgo(dbDate: string | Date): string {
     const then = typeof dbDate === 'string' ? new Date(dbDate.replace(' ', 'T') + 'Z').getTime() : dbDate.getTime();
     const mins = Math.floor((Date.now() - then) / 60_000);
@@ -881,184 +799,79 @@ function formatAgo(dbDate: string | Date): string {
     return `${Math.floor(mins / 1440)}d ago`;
 }
 
-// the reigning king of each window, shown side by side above the table
-const KING_WINDOWS = [
-    { label: 'All time', ms: 0 },
-    { label: 'This week', ms: 7 * 24 * 3600_000 },
-    { label: 'Today', ms: 24 * 3600_000 }
-];
+type RuniteRow = { username: string; ore: number; last_mined: string | Date };
 
-type KothRow = { username: string; minutes: number; last_held: string | Date };
-type KothKing = { label: string; ms: number; leader: { username: string; minutes: number } | undefined; sprite: KothLoadout | undefined };
-type KothPageData = { results: KothRow[]; spriteFor: Map<string, KothLoadout>; kings: KothKing[] };
+// Same short TTL + in-flight dedup as getRankedList: these run on the tick thread.
+const runiteCache = new Map<string, { at: number; rows: RuniteRow[]; pending: Promise<RuniteRow[]> | null }>();
 
-// Same short TTL + in-flight dedup as getRankedList: these run on the tick thread, and the
-// capture table grows by one row per minute so a group-by over it is not free.
-const kothCache = new Map<string, { at: number; data: KothPageData | null; pending: Promise<KothPageData> | null }>();
-
-async function getKothPageData(profile: string, windowMs: number): Promise<KothPageData> {
+async function getRuniteRows(profile: string, windowMs: number): Promise<RuniteRow[]> {
     const key = `${profile}:${windowMs}`;
     const now = Date.now();
-    const cached = kothCache.get(key);
-    if (cached?.data && now - cached.at < RANKED_TTL_MS) {
-        return cached.data;
+    const cached = runiteCache.get(key);
+    if (cached && now - cached.at < RANKED_TTL_MS) {
+        return cached.rows;
     }
     if (cached?.pending) {
         return cached.pending;
     }
-    const load = loadKothPageData(profile, windowMs).then(data => {
-        kothCache.set(key, { at: Date.now(), data, pending: null });
-        return data;
-    });
-    kothCache.set(key, { at: cached?.at ?? 0, data: cached?.data ?? null, pending: load });
+    const load = (async () => {
+        let query = db
+            .selectFrom('runite_mine')
+            .innerJoin('account', 'account.username', 'runite_mine.username')
+            .select(({ fn }) => ['runite_mine.username', fn.countAll<number>().as('ore'), fn.max('runite_mine.timestamp').as('last_mined')])
+            .where('runite_mine.profile', '=', profile)
+            .where('account.staffmodlevel', '<=', 1)
+            .groupBy('runite_mine.username')
+            .orderBy('ore', 'desc')
+            // ties go to whoever reached the count first
+            .orderBy('last_mined', 'asc')
+            .limit(50);
+        if (windowMs > 0) {
+            query = query.where('runite_mine.timestamp', '>', toDbDate(Date.now() - windowMs));
+        }
+        if (hiddenNames.length > 0) {
+            query = query.where(eb => eb.not(eb(eb.fn('lower', ['runite_mine.username']), 'in', hiddenNames)));
+        }
+        const rows = (await query.execute()) as RuniteRow[];
+        runiteCache.set(key, { at: Date.now(), rows, pending: null });
+        return rows;
+    })();
+    runiteCache.set(key, { at: cached?.at ?? 0, rows: cached?.rows ?? [], pending: load });
     try {
         return await load;
     } catch (err) {
-        kothCache.delete(key);
+        runiteCache.delete(key);
         throw err;
     }
 }
 
-async function loadKothPageData(profile: string, windowMs: number): Promise<KothPageData> {
-    let query = db
-        .selectFrom('koth_capture')
-        .innerJoin('account', 'account.username', 'koth_capture.username')
-        .select(({ fn }) => ['koth_capture.username', fn.countAll<number>().as('minutes'), fn.max('koth_capture.timestamp').as('last_held')])
-        .where('koth_capture.profile', '=', profile)
-        .where('account.staffmodlevel', '<=', 1)
-        .groupBy('koth_capture.username')
-        .orderBy('minutes', 'desc')
-        .limit(50);
-    if (windowMs > 0) {
-        query = query.where('koth_capture.timestamp', '>', toDbDate(Date.now() - windowMs));
-    }
-    if (hiddenNames.length > 0) {
-        query = query.where(eb => eb.not(eb(eb.fn('lower', ['koth_capture.username']), 'in', hiddenNames)));
-    }
-    const results = await query.execute();
-
-    // median loadout for a set of players over a window
-    const medianLoadouts = async (names: string[], ms: number): Promise<Map<string, KothLoadout>> => {
-        const medians = new Map<string, KothLoadout>();
-        if (names.length === 0) {
-            return medians;
-        }
-        let loadoutQuery = db.selectFrom('koth_capture').select(['username', 'loadout']).where('profile', '=', profile).where('username', 'in', names);
-        if (ms > 0) {
-            loadoutQuery = loadoutQuery.where('timestamp', '>', toDbDate(Date.now() - ms));
-        }
-        const loadoutRows = await loadoutQuery.execute();
-        const grouped = new Map<string, string[]>();
-        for (const row of loadoutRows) {
-            let list = grouped.get(row.username);
-            if (!list) {
-                list = [];
-                grouped.set(row.username, list);
-            }
-            list.push(row.loadout);
-        }
-        for (const [name, list] of grouped) {
-            const median = medianLoadout(list);
-            if (median) {
-                medians.set(name, median);
-            }
-        }
-        return medians;
-    };
-
-    const spriteFor = await medianLoadouts(
-        results.slice(0, 10).map(r => r.username),
-        windowMs
-    );
-
-    const kings = await Promise.all(
-        KING_WINDOWS.map(async w => {
-            let kingQuery = db
-                .selectFrom('koth_capture')
-                .innerJoin('account', 'account.username', 'koth_capture.username')
-                .select(({ fn }) => ['koth_capture.username', fn.countAll<number>().as('minutes')])
-                .where('koth_capture.profile', '=', profile)
-                .where('account.staffmodlevel', '<=', 1)
-                .groupBy('koth_capture.username')
-                .orderBy('minutes', 'desc')
-                .limit(1);
-            if (w.ms > 0) {
-                kingQuery = kingQuery.where('koth_capture.timestamp', '>', toDbDate(Date.now() - w.ms));
-            }
-            if (hiddenNames.length > 0) {
-                kingQuery = kingQuery.where(eb => eb.not(eb(eb.fn('lower', ['koth_capture.username']), 'in', hiddenNames)));
-            }
-            const leader = await kingQuery.executeTakeFirst();
-            const sprite = leader ? (await medianLoadouts([leader.username], w.ms)).get(leader.username) : undefined;
-            return { ...w, leader, sprite };
-        })
-    );
-
-    return { results: results as KothRow[], spriteFor, kings };
-}
-
-export async function handleHiscoresKothPage(url: URL): Promise<Response | null> {
-    const match = url.pathname.match(/^\/hi(?:gh)?scores\/koth\/?$/);
+export async function handleHiscoresRunitePage(url: URL): Promise<Response | null> {
+    const match = url.pathname.match(/^\/hi(?:gh)?scores\/runite\/?$/);
     if (!match) return null;
 
     const profile = (url.searchParams.get('profile') || 'main').replace(/[^a-zA-Z0-9_-]/g, '');
     const windowParam = url.searchParams.get('window') || 'all';
     const windowMs = windowParam === 'day' ? 24 * 3600_000 : windowParam === 'week' ? 7 * 24 * 3600_000 : 0;
 
-    const { results, spriteFor, kings } = await getKothPageData(profile, windowMs);
+    const results = await getRuniteRows(profile, windowMs);
 
-    // sprites are rendered server-side (see web/sprites) and cached by URL, so the page is
-    // plain HTML + <img> — no viewer bundle or model archives shipped to the browser
-    const spriteImg = (loadout: KothLoadout, size: 'big' | 'small'): string => {
-        const w = size === 'big' ? 78 : 52;
-        const h = size === 'big' ? 130 : 88;
-        return `<img src="${playerSpriteUrl(loadout, w, h)}" width="${w}" height="${h}" alt="" loading="lazy" decoding="async" style="image-rendering:pixelated;vertical-align:middle">`;
-    };
-
-    const rows = results.map((r, i) => {
-        const sprite = spriteFor.get(r.username);
-        return `
+    const rows = results.map(
+        (r, i) => `
             <tr>
                 <td align="right">${i + 1}</td>
-                <td>${sprite ? spriteImg(sprite, 'small') : ''}</td>
                 <td><a href="/hiscores/player/${encodeURIComponent(r.username)}?profile=${profile}" class="c">${escapeHtml(r.username)}</a></td>
-                <td align="right" class="yellow">${Number(r.minutes).toLocaleString()}</td>
-                <td align="right" style="font-size:11px">${formatAgo(r.last_held as string | Date)}</td>
+                <td align="right" class="yellow">${Number(r.ore).toLocaleString()}</td>
+                <td align="right" style="font-size:11px">${formatAgo(r.last_mined)}</td>
             </tr>
-        `;
-    });
+        `
+    );
 
-    // Sidebar skill links
-    const skillOptions = [{ id: 0, name: 'Overall' }, ...ENABLED_SKILLS.map(s => ({ id: s.id + 1, name: s.name }))];
-    const skillLinks =
-        skillOptions
-            .map(s => {
-                const icon = s.name === 'Overall' ? '' : `<img src="/img/skill/${s.name.toLowerCase()}.png" width="15" height="15" style="vertical-align:middle;margin-right:3px">`;
-                return `<tr><td><a href="/hiscores?category=${s.id}&profile=${profile}" class="c">${icon}${s.name}</a></td></tr>`;
-            })
-            .join('\n') +
-        `\n<tr><td>&nbsp;</td></tr>\n<tr><td><a href="/hiscores/outfit?profile=${profile}" class="c text-orange">Equipment</a></td></tr>` +
-        `\n<tr><td><a href="/hiscores/bank?profile=${profile}" class="c text-orange">Bank</a></td></tr>` +
-        `\n<tr><td><a href="/hiscores/koth?profile=${profile}" class="c text-orange">King of the Hill</a></td></tr>`;
-
-    const windowTab = (key: string, label: string): string => (windowParam === key ? `<b class="text-orange">${label}</b>` : `<a href="/hiscores/koth?window=${key}&profile=${profile}" class="c">${label}</a>`);
-
-    const kingBanner = `<table width="400" bgcolor="black" cellpadding="6"><tr>
-        ${kings
-            .map(
-                k => `<td class="e" width="33%" align="center" valign="bottom">
-                <b style="font-size:11px">${k.label}</b><br>
-                ${k.sprite ? spriteImg(k.sprite, 'small') + '<br>' : ''}
-                ${k.leader ? `<a href="/hiscores/player/${encodeURIComponent(k.leader.username)}?profile=${profile}" class="c text-orange">${escapeHtml(k.leader.username)}</a><br><span class="yellow" style="font-size:11px">${Number(k.leader.minutes).toLocaleString()} min</span>` : '<span style="font-size:11px">unclaimed</span>'}
-            </td>`
-            )
-            .join('')}
-    </tr></table><br>`;
+    const windowTab = (key: string, label: string): string => (windowParam === key ? `<b class="text-orange">${label}</b>` : `<a href="/hiscores/runite?window=${key}&profile=${profile}" class="c">${label}</a>`);
 
     const html = `<!DOCTYPE html>
 <html>
 <head>
-    <title>King of the Hill Hiscores</title>
+    <title>Lava Maze Runite Hiscores</title>
     <style>${HISCORES_STYLES}</style>
 </head>
 <body>
@@ -1088,7 +901,7 @@ export async function handleHiscoresKothPage(url: URL): Promise<Response | null>
                     <tr>
                         <td class="e">
                             <center>
-                                <b>King of the Hill</b><br>
+                                <b>Lava Maze Runite</b><br>
                                 <a href="/" class="c">Main menu</a> | <a href="/hiscores?profile=${profile}" class="c">All Hiscores</a>
                             </center>
                         </td>
@@ -1096,11 +909,14 @@ export async function handleHiscoresKothPage(url: URL): Promise<Response | null>
                 </table>
                 <br>
 
-                <!-- Rules blurb -->
-                <table width="400" bgcolor="black" cellpadding="6">
+                <!-- Location shot + rules blurb -->
+                <table width="412" bgcolor="black" cellpadding="4">
                     <tr>
                         <td class="e" style="font-size:12px">
-                            <center>King of the hill control time for the Demonic Ruins walled area. </center>
+                            <center>
+                                <img src="/img/lava_maze_runite.jpg" width="400" height="250" alt="The two runite rocks in the Lava Maze" style="display:block">
+                                Runite ore mined from the two Lava Maze rocks, level 46 Wilderness.
+                            </center>
                         </td>
                     </tr>
                 </table>
@@ -1117,7 +933,7 @@ export async function handleHiscoresKothPage(url: URL): Promise<Response | null>
                                         <td class="e" valign="top">
                                             <center>
                                                 <table height="380" cellspacing="1" cellpadding="0">
-                                                    ${skillLinks}
+                                                    ${hiscoreTableLinks(profile)}
                                                 </table>
                                             </center>
                                         </td>
@@ -1128,8 +944,7 @@ export async function handleHiscoresKothPage(url: URL): Promise<Response | null>
 
                         <td width="400" valign="top">
                             <center>
-                                <b>Kings of the Hill</b><br>
-                                ${kingBanner}
+                                <b>Runite ore mined</b><br>
                                 ${windowTab('all', 'All time')} | ${windowTab('week', 'This week')} | ${windowTab('day', 'Today')}<br>
                                 <table width="400" bgcolor="black" cellpadding="4">
                                     <tr>
@@ -1139,14 +954,13 @@ export async function handleHiscoresKothPage(url: URL): Promise<Response | null>
                                                     ? `<table align="center" cellspacing="2" cellpadding="2">
                                                 <tr>
                                                     <td><b>#</b></td>
-                                                    <td></td>
                                                     <td><b>Name</b></td>
-                                                    <td align="right"><b>Minutes</b></td>
-                                                    <td align="right"><b>Last held</b></td>
+                                                    <td align="right"><b>Ore</b></td>
+                                                    <td align="right"><b>Last mined</b></td>
                                                 </tr>
                                                 ${rows.join('')}
                                             </table>`
-                                                    : '<center><br>No one has held the ruins yet</center>'
+                                                    : '<center><br>No runite mined yet</center>'
                                             }
                                         </td>
                                     </tr>
@@ -1231,19 +1045,6 @@ export async function handleHiscoresBankPage(url: URL): Promise<Response | null>
         `;
     });
 
-    // Sidebar skill links
-    const skillOptions = [{ id: 0, name: 'Overall' }, ...ENABLED_SKILLS.map(s => ({ id: s.id + 1, name: s.name }))];
-    const skillLinks =
-        skillOptions
-            .map(s => {
-                const icon = s.name === 'Overall' ? '' : `<img src="/img/skill/${s.name.toLowerCase()}.png" width="15" height="15" style="vertical-align:middle;margin-right:3px">`;
-                return `<tr><td><a href="/hiscores?category=${s.id}&profile=${profile}" class="c">${icon}${s.name}</a></td></tr>`;
-            })
-            .join('\n') +
-        `\n<tr><td>&nbsp;</td></tr>\n<tr><td><a href="/hiscores/outfit?profile=${profile}" class="c text-orange">Equipment</a></td></tr>` +
-        `\n<tr><td><a href="/hiscores/bank?profile=${profile}" class="c text-orange">Bank</a></td></tr>` +
-        `\n<tr><td><a href="/hiscores/koth?profile=${profile}" class="c text-orange">King of the Hill</a></td></tr>`;
-
     const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -1296,7 +1097,7 @@ export async function handleHiscoresBankPage(url: URL): Promise<Response | null>
                                         <td class="e" valign="top">
                                             <center>
                                                 <table height="380" cellspacing="1" cellpadding="0">
-                                                    ${skillLinks}
+                                                    ${hiscoreTableLinks(profile)}
                                                 </table>
                                             </center>
                                         </td>

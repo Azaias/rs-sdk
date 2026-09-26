@@ -86,15 +86,24 @@ survival) is described in the project memory; this file is the human-readable ch
 - [ ] **`[LOGOUT DEBUG]` instrumentation** — console.warn breadcrumbs in
       `NetworkPlayer.ts`, `IdleTimerHandler.ts`, `ClientCheatHandler.ts`, `PlayerOps.ts`,
       `World.ts` (and webclient `Client.ts`). Low-stakes but useful; fine to re-add lazily.
-- [ ] **King of the Hill (Demonic Ruins)** — `src/engine/Koth.ts` (rs-sdk-only file; wall
-      polygon traced from `m51_60.jm2`, one capture per wall-clock minute) + hook in
-      `World.ts` `cycle()` (`Koth.cycle` → `koth_capture` postMessage), relay cases in
-      `LoggerThread.ts`/`LoggerClient.ts`/`LoggerServer.ts`, `koth_capture` table (both
-      prisma schemas + `db/types.ts`), `/hiscores/koth` page in `web/pages/hiscores.ts`
-      (registered in `web/index.ts` + `web/hiscoresServer.ts`), player-sprite renderer in
-      webclient `src/viewer/ItemViewer.ts` (`renderPlayerSpriteAsImageData`). Depends on
-      the logger pipeline (EASY_STARTUP or a standalone `bun run logger`) — events are
-      silently dropped without it.
+- [ ] **Lava Maze runite hiscores** — content `mining.rs2` (`get_ore_normal`) calls the
+      `runite_mined(loc_coord)` command (declared in `engine.rs2`) whenever it gives runite
+      ore; `RUNITE_MINED` opcode (10011) in `ScriptOpcode.ts`/`ScriptOpcodePointers.ts`, handler
+      in `DebugOps.ts` counts only the two Lava Maze rocks (0_3059_3885, 0_3060_3884, from
+      `m47_60.jm2`) → `World.notifyRuniteMined` → `runite_mine` relay cases in
+      `LoggerThread.ts`/`LoggerClient.ts`/`LoggerServer.ts`, `runite_mine` table (both prisma
+      schemas + `db/types.ts`), `/hiscores/runite` page in `web/pages/hiscores.ts`
+      (registered in `web/index.ts` + `web/hiscoresServer.ts`). Depends on the logger
+      pipeline (EASY_STARTUP or a standalone `bun run logger`) — events are silently
+      dropped without it. Replaced King of the Hill (migration `20260926000000_runite_mine`
+      drops `koth_capture`).
+      Verify: `grep -n "runite_mined" ../content/scripts/skill_mining/scripts/mining.rs2 && grep -n "RUNITE_MINED" src/engine/script/handlers/DebugOps.ts`
+- [ ] **Equipment hiscores sprites** — `LoginServer.ts` `outfitAppearance()` stores the worn
+      outfit's resolved appearance slots (wearpos2/3 masking needs obj config) in
+      `hiscore_outfit.appearance` (migration `20260926010000_hiscore_outfit_appearance`) on every
+      outfit hiscore write; `/hiscores/outfit` shows a `/sprite/player` image for the top 10 and
+      `/sprite/item` icons (no in-browser viewer bundle). Sprites come from `web/sprites/`
+      (worker hosting webclient `src/viewer/ItemViewer.ts` `renderPlayerSprite`).
 - [ ] **Worker-thread crash hardening** — `src/server/InternalClient.ts` uses persistent
       `.on('close'/'error')` handlers instead of `.once()` (a second ws error after a
       successful open was an unhandled EventEmitter 'error' that killed the worker → every
@@ -210,7 +219,7 @@ survival) is described in the project memory; this file is the human-readable ch
 - [ ] **`src/dash3d/LoopCycle.ts`** (rs-sdk-only) — the frame counter split out of Client;
       `Client.loopCycle` is now a static getter/setter over it and
       `ClientPlayer.ts` reads `LoopCycle.value` instead of importing Client. Required so
-      the viewer bundle (which imports ClientPlayer for KOTH character sprites) doesn't
+      the viewer bundle (which imports ClientPlayer for character sprites) doesn't
       drag the whole game client (and its node-only `open` dep) in and fail to build.
 
 ### Client.ts bot SDK surface (~1,450 added lines inside upstream's `src/client/Client.ts`)

@@ -496,18 +496,15 @@ export default class LoggerServer {
                             await db.insertInto('player_telemetry').values(rows).execute();
                             break;
                         }
-                        case 'koth_capture': {
+                        case 'runite_mine': {
                             const { event } = msg;
 
                             await db
-                                .insertInto('koth_capture')
+                                .insertInto('runite_mine')
                                 .values({
                                     timestamp: toDbDate(event.timestamp),
                                     profile: event.profile,
-                                    username: event.username,
-                                    combat_level: event.combat_level,
-                                    contenders: event.contenders,
-                                    loadout: event.loadout
+                                    username: event.username
                                 })
                                 .execute();
                             break;

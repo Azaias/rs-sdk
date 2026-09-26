@@ -57,7 +57,7 @@ export default class LoggerClient extends InternalClient {
         );
     }
 
-    public async kothCapture(event: object) {
+    public async runiteMine(event: object) {
         await this.connect();
 
         if (!this.ws || !this.wsr || !this.wsr.checkIfWsLive()) {
@@ -66,7 +66,7 @@ export default class LoggerClient extends InternalClient {
 
         this.ws.send(
             JSON.stringify({
-                type: 'koth_capture',
+                type: 'runite_mine',
                 world: Environment.node.id,
                 profile: Environment.node.profile,
                 event

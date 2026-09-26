@@ -999,6 +999,11 @@ const ScriptOpcodePointers: {
     },
     [ScriptOpcode.DB_LISTALL_WITH_COUNT]: {
         set: ['find_db']
+    },
+
+    // rs-sdk ops
+    [ScriptOpcode.RUNITE_MINED]: {
+        require: ['active_player']
     }
 };
 

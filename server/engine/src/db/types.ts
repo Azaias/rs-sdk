@@ -120,6 +120,7 @@ export type hiscore_outfit = {
     profile: Generated<string>;
     value: number;
     items: string;
+    appearance: string | null;
     date: Generated<Timestamp>;
 };
 export type hiscore_bank = {
@@ -151,14 +152,11 @@ export type player_telemetry_segment = {
     sample_count: number;
     data: Buffer;
 };
-export type koth_capture = {
+export type runite_mine = {
     id: Generated<number>;
     timestamp: Timestamp;
     profile: Generated<string>;
     username: string;
-    combat_level: number;
-    contenders: number;
-    loadout: string;
 };
 export type player_skills_log = {
     id: Generated<number>;
@@ -178,13 +176,13 @@ export type DB = {
     ignorelist: ignorelist;
     input_report: input_report;
     ipban: ipban;
-    koth_capture: koth_capture;
     player_telemetry: player_telemetry;
     player_telemetry_segment: player_telemetry_segment;
     player_skills_log: player_skills_log;
     private_chat: private_chat;
     public_chat: public_chat;
     report: report;
+    runite_mine: runite_mine;
     session: session;
     session_log: session_log;
     session_wealth: session_wealth;
