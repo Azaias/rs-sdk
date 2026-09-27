@@ -110,6 +110,19 @@ cd server/gateway && bun run gateway
 
 The gateway listens on `ws://localhost:7780` by default (configurable via `AGENT_PORT` env var).
 
+Or start the engine and gateway together (after a one-off `cd server/webclient && bun run build`):
+
+```sh
+bun server/dev.ts
+```
+
+It stops both when you press Ctrl+C or close the terminal that started it. On Windows,
+start it from PowerShell or cmd, not Git Bash: Git Bash drops processes out of the Windows
+process tree, so stopping that shell (or a coding agent's background task running in it)
+leaves the servers running and holding their ports. Ctrl+C lets the engine save players and
+shut down cleanly; a forced stop (killing the process tree) does not, so log bots out first,
+as the engine otherwise only autosaves every 15 minutes.
+
 ## Development checks
 
 Install the root and webclient dependencies, then run the same checks as CI:

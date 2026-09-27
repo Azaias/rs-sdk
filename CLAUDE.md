@@ -17,6 +17,8 @@ bun bots/create-bot.ts {username}
 bun bots/create-bot.ts
 
 # Use local server (sets SERVER=localhost in bot.env)
+# Start it with `bun server/dev.ts` (see README). On Windows, run that from
+# PowerShell, not Git Bash, or stopping it leaves the servers running.
 bun bots/create-bot.ts {username} --local
 
 # Use a custom server
