@@ -28,8 +28,11 @@ async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs: numbe
 }
 
 beforeAll(async () => {
+    // process.execPath, not 'bun': on Windows 'bun' can resolve to a bun.cmd
+    // shim, and kill() then only stops the cmd.exe wrapper - the gateway is
+    // orphaned and holds the test run's stdout open.
     gateway = Bun.spawn({
-        cmd: ['bun', join(REPO_ROOT, 'server', 'gateway', 'gateway.ts')],
+        cmd: [process.execPath, join(REPO_ROOT, 'server', 'gateway', 'gateway.ts')],
         env: { ...process.env, AGENT_PORT: String(PORT), LOGIN_SERVER: 'false' },
         stdout: 'ignore',
         stderr: 'ignore'
